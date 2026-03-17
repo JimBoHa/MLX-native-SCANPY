@@ -2,14 +2,20 @@
 
 `MLX-native-SCANPY` is a small Python library that ports the core numerical pieces of a Scanpy-style preprocessing pipeline to Apple MLX so other macOS apps can call them directly.
 
-This repository does not attempt full feature parity with upstream Scanpy. The first release focuses on MLX-backed kernels that are commonly used as the base of a single-cell workflow:
+This repository does not attempt full feature parity with upstream Scanpy. The current release focuses on MLX-backed kernels and a small Scanpy-like namespace that other apps can import directly:
 
+- `AnnDataLite`
+- `pp.calculate_qc_metrics`
+- `pp.filter_cells`
+- `pp.filter_genes`
+- `pp.subsample`
 - total-count normalization
 - `log1p` transform
 - feature scaling
 - highly variable gene selection
 - PCA
 - k-nearest-neighbor graph construction
+- `tl.rank_genes_groups`
 - a single end-to-end analysis entry point
 
 ## Installation

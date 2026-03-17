@@ -3,12 +3,15 @@ import unittest
 import numpy as np
 
 from mlx_native_scanpy import (
+    AnnDataLite,
     MLXScanpyAnalyzer,
     highly_variable_genes,
     neighbors,
     normalize_total,
     pca,
+    pp,
     scale,
+    tl,
 )
 
 
@@ -99,6 +102,57 @@ class PipelineTests(unittest.TestCase):
         means = scaled.mean(axis=0)
 
         np.testing.assert_allclose(means, np.zeros(2), atol=1e-6)
+
+
+class AnnDataLiteTests(unittest.TestCase):
+    def test_qc_and_filter_functions_update_anndata(self):
+        adata = AnnDataLite(
+            X=[
+                [0.0, 1.0, 3.0],
+                [0.0, 0.0, 0.0],
+                [5.0, 0.0, 1.0],
+            ],
+            obs_names=["a", "b", "c"],
+            var_names=["g1", "g2", "g3"],
+        )
+
+        metrics = pp.calculate_qc_metrics(adata)
+        self.assertEqual(metrics["total_counts"].tolist(), [4.0, 0.0, 6.0])
+        filtered, mask = pp.filter_cells(adata, min_counts=1)
+        self.assertEqual(mask.tolist(), [True, False, True])
+        self.assertEqual(filtered.obs_names, ["a", "c"])
+
+        gene_filtered, gene_mask = pp.filter_genes(adata, min_cells=1)
+        self.assertEqual(gene_mask.tolist(), [True, True, True])
+        self.assertEqual(gene_filtered.var_names, ["g1", "g2", "g3"])
+
+    def test_pp_and_tl_modules_store_scanpy_like_annotations(self):
+        adata = AnnDataLite(
+            X=[
+                [10.0, 0.0, 1.0, 0.0],
+                [11.0, 0.0, 2.0, 0.0],
+                [0.0, 7.0, 0.0, 1.0],
+                [0.0, 8.0, 0.0, 2.0],
+            ],
+            obs_names=["c1", "c2", "c3", "c4"],
+            var_names=["gene_a", "gene_b", "gene_c", "gene_d"],
+            obs={"cluster": np.array(["A", "A", "B", "B"])},
+        )
+
+        adata = pp.normalize_total(adata)
+        adata = pp.log1p(adata)
+        adata = pp.highly_variable_genes(adata, n_top_genes=2)
+        adata = pp.scale(adata)
+        adata = tl.pca(adata, n_comps=2)
+        adata = pp.neighbors(adata, n_neighbors=1, use_rep="X_pca")
+        ranks = tl.rank_genes_groups(adata, groupby="cluster", n_genes=2)
+
+        self.assertIn("highly_variable", adata.var)
+        self.assertEqual(np.asarray(adata.obsm["X_pca"]).shape, (4, 2))
+        self.assertEqual(np.asarray(adata.varm["PCs"]).shape, (4, 2))
+        self.assertIn("connectivities", adata.obsp)
+        self.assertEqual(ranks["names"]["A"].shape[0], 2)
+        self.assertEqual(ranks["names"]["B"].shape[0], 2)
 
 
 if __name__ == "__main__":
