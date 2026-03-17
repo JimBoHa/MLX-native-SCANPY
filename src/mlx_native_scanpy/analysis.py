@@ -3,13 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import mlx.core as mx
 import numpy as np
+
+from ._mlx import get_mx
 
 EPSILON = 1e-8
 
 
-def _to_mx_array(data: Any, dtype: Any = mx.float32) -> Any:
+def _to_mx_array(data: Any, dtype: Any = None) -> Any:
+    mx = get_mx()
+    if dtype is None:
+        dtype = mx.float32
     return mx.array(data, dtype=dtype)
 
 
@@ -18,6 +22,7 @@ def _to_numpy(data: Any) -> np.ndarray:
 
 
 def normalize_total(data: Any, target_sum: float = 1e4) -> Any:
+    mx = get_mx()
     x = _to_mx_array(data)
     totals = mx.sum(x, axis=1, keepdims=True)
     safe_totals = mx.where(totals > 0, totals, mx.ones_like(totals))
@@ -26,6 +31,7 @@ def normalize_total(data: Any, target_sum: float = 1e4) -> Any:
 
 
 def log1p(data: Any) -> Any:
+    mx = get_mx()
     x = _to_mx_array(data)
     return mx.log1p(x)
 
@@ -35,6 +41,7 @@ def scale(
     zero_center: bool = True,
     max_value: float | None = 10.0,
 ) -> Any:
+    mx = get_mx()
     x = _to_mx_array(data)
     centered = x - mx.mean(x, axis=0, keepdims=True) if zero_center else x
     var = mx.mean(centered * centered, axis=0, keepdims=True)
@@ -49,6 +56,7 @@ def highly_variable_genes(
     data: Any,
     n_top_genes: int = 2000,
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    mx = get_mx()
     x = _to_mx_array(data)
     means = mx.mean(x, axis=0)
     centered = x - mx.mean(x, axis=0, keepdims=True)
@@ -68,6 +76,7 @@ def highly_variable_genes(
 
 
 def pca(data: Any, n_comps: int = 50) -> dict[str, Any]:
+    mx = get_mx()
     x = _to_mx_array(data)
     n_obs = int(x.shape[0])
     n_vars = int(x.shape[1])
@@ -99,6 +108,7 @@ def pca(data: Any, n_comps: int = 50) -> dict[str, Any]:
 
 
 def neighbors(data: Any, n_neighbors: int = 15) -> dict[str, Any]:
+    mx = get_mx()
     x = _to_mx_array(data)
     n_obs = int(x.shape[0])
     if n_obs < 2:

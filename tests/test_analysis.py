@@ -1,12 +1,15 @@
 import unittest
 
 import numpy as np
+import scanpy as sc
+import mlx_native_scanpy
 
+from mlx_native_scanpy.analysis import neighbors as analysis_neighbors
 from mlx_native_scanpy import (
     AnnDataLite,
+    AnnData,
     MLXScanpyAnalyzer,
     highly_variable_genes,
-    neighbors,
     normalize_total,
     pca,
     pp,
@@ -64,7 +67,7 @@ class PCATests(unittest.TestCase):
 class NeighborTests(unittest.TestCase):
     def test_neighbors_returns_expected_pairs(self):
         embedding = [[0.0], [1.0], [5.0], [6.0]]
-        result = neighbors(embedding, n_neighbors=1)
+        result = analysis_neighbors(embedding, n_neighbors=1)
         connectivities = as_numpy(result["connectivities"])
 
         self.assertEqual(result["indices"][0].tolist(), [1])
@@ -143,7 +146,7 @@ class AnnDataLiteTests(unittest.TestCase):
         adata = pp.log1p(adata)
         adata = pp.highly_variable_genes(adata, n_top_genes=2)
         adata = pp.scale(adata)
-        adata = tl.pca(adata, n_comps=2)
+        adata = pp.pca(adata, n_comps=2)
         adata = pp.neighbors(adata, n_neighbors=1, use_rep="X_pca")
         ranks = tl.rank_genes_groups(adata, groupby="cluster", n_genes=2)
 
@@ -153,6 +156,26 @@ class AnnDataLiteTests(unittest.TestCase):
         self.assertIn("connectivities", adata.obsp)
         self.assertEqual(ranks["names"]["A"].shape[0], 2)
         self.assertEqual(ranks["names"]["B"].shape[0], 2)
+
+
+class ScanpyParityTests(unittest.TestCase):
+    def test_top_level_api_covers_scanpy(self):
+        expected = {name for name in dir(sc) if not name.startswith("_")}
+        actual = {name for name in dir(mlx_native_scanpy) if not name.startswith("_")}
+        missing = expected - actual
+        self.assertEqual(missing, set(), f"Missing top-level names: {sorted(missing)}")
+
+    def test_namespace_api_covers_scanpy(self):
+        for module_name in ["pp", "tl", "pl", "get", "datasets", "queries", "metrics"]:
+            expected = {name for name in dir(getattr(sc, module_name)) if not name.startswith("_")}
+            actual = {name for name in dir(getattr(mlx_native_scanpy, module_name)) if not name.startswith("_")}
+            missing = expected - actual
+            self.assertEqual(missing, set(), f"{module_name} missing names: {sorted(missing)}")
+
+    def test_real_anndata_uses_scanpy_fallback(self):
+        adata = AnnData(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))
+        pp.normalize_total(adata, target_sum=10.0, inplace=True)
+        np.testing.assert_allclose(np.asarray(adata.X).sum(axis=1), np.array([10.0, 10.0]), rtol=1e-5)
 
 
 if __name__ == "__main__":

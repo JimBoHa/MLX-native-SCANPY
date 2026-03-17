@@ -2,35 +2,32 @@ from __future__ import annotations
 
 from typing import Any
 
-import mlx.core as mx
 import numpy as np
+import scanpy as sc
+from anndata import AnnData as ScanpyAnnData
 
 from .anndata import AnnDataLite
-from .analysis import pca as _pca
 
 
-def pca(data: Any, n_comps: int = 50, inplace: bool = False) -> Any:
-    matrix = data.X if isinstance(data, AnnDataLite) else data
-    result = _pca(matrix, n_comps=n_comps)
-    if isinstance(data, AnnDataLite):
-        target = data if inplace else data.copy()
-        target.obsm["X_pca"] = result["scores"]
-        target.varm["PCs"] = result["components"]
-        target.uns["pca"] = {
-            "variance": result["explained_variance"],
-            "variance_ratio": result["explained_variance_ratio"],
-        }
-        return target
-    return result
+def _use_custom_path(data: Any) -> bool:
+    return isinstance(data, AnnDataLite) or not isinstance(data, ScanpyAnnData)
 
 
 def rank_genes_groups(
-    adata: AnnDataLite,
+    adata: Any,
     groupby: str,
     groups: list[str] | None = None,
     reference: str = "rest",
     n_genes: int | None = None,
 ) -> dict[str, dict[str, np.ndarray]]:
+    if not _use_custom_path(adata):
+        return sc.tl.rank_genes_groups(
+            adata,
+            groupby=groupby,
+            groups=groups,
+            reference=reference,
+            n_genes=n_genes,
+        )
     if groupby not in adata.obs:
         raise KeyError(f"{groupby} not found in adata.obs")
     if reference != "rest":
@@ -79,3 +76,11 @@ def rank_genes_groups(
     }
     adata.uns["rank_genes_groups"] = result
     return result
+
+
+def __getattr__(name: str) -> Any:
+    return getattr(sc.tl, name)
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(dir(sc.tl)))

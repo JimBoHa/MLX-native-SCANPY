@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-import mlx.core as mx
 import numpy as np
+
+from ._mlx import get_mx
 
 
 def _clone_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
@@ -34,6 +35,7 @@ class AnnDataLite:
     layers: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        mx = get_mx()
         self.X = mx.array(self.X, dtype=mx.float32)
         n_obs = int(self.X.shape[0])
         n_vars = int(self.X.shape[1])

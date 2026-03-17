@@ -2,21 +2,25 @@ from __future__ import annotations
 
 from typing import Any
 
-import mlx.core as mx
 import numpy as np
+from anndata import AnnData as ScanpyAnnData
+import scanpy as sc
 
 from .anndata import AnnDataLite
+from ._mlx import get_mx
 from .analysis import (
     EPSILON,
     highly_variable_genes as _highly_variable_genes,
     log1p as _log1p,
     neighbors as _neighbors,
     normalize_total as _normalize_total,
+    pca as _pca,
     scale as _scale,
 )
 
 
 def _as_mx(data: Any) -> Any:
+    mx = get_mx()
     return mx.array(data, dtype=mx.float32)
 
 
@@ -28,7 +32,13 @@ def _maybe_copy_adata(data: AnnDataLite, inplace: bool) -> AnnDataLite:
     return data if inplace else data.copy()
 
 
+def _use_custom_path(data: Any) -> bool:
+    return isinstance(data, AnnDataLite) or not isinstance(data, ScanpyAnnData)
+
+
 def calculate_qc_metrics(data: Any) -> dict[str, np.ndarray]:
+    if not _use_custom_path(data):
+        return sc.pp.calculate_qc_metrics(data)
     matrix = np.asarray(_matrix_from(data))
     total_counts = matrix.sum(axis=1).astype(np.float32)
     n_genes_by_counts = (matrix > 0).sum(axis=1).astype(np.int64)
@@ -66,6 +76,15 @@ def filter_cells(
     max_genes: int | None = None,
     inplace: bool = False,
 ) -> tuple[Any, np.ndarray]:
+    if not _use_custom_path(data):
+        return sc.pp.filter_cells(
+            data,
+            min_counts=min_counts,
+            min_genes=min_genes,
+            max_counts=max_counts,
+            max_genes=max_genes,
+            inplace=inplace,
+        )
     matrix = np.asarray(_matrix_from(data))
     total_counts = matrix.sum(axis=1)
     n_genes = (matrix > 0).sum(axis=1)
@@ -101,6 +120,15 @@ def filter_genes(
     max_cells: int | None = None,
     inplace: bool = False,
 ) -> tuple[Any, np.ndarray]:
+    if not _use_custom_path(data):
+        return sc.pp.filter_genes(
+            data,
+            min_counts=min_counts,
+            min_cells=min_cells,
+            max_counts=max_counts,
+            max_cells=max_cells,
+            inplace=inplace,
+        )
     matrix = np.asarray(_matrix_from(data))
     total_counts = matrix.sum(axis=0)
     n_cells = (matrix > 0).sum(axis=0)
@@ -135,6 +163,14 @@ def subsample(
     random_state: int = 0,
     inplace: bool = False,
 ) -> tuple[Any, np.ndarray]:
+    if not _use_custom_path(data):
+        return sc.pp.subsample(
+            data,
+            n_obs=n_obs,
+            fraction=fraction,
+            random_state=random_state,
+            copy=not inplace,
+        )
     matrix = np.asarray(_matrix_from(data))
     if (n_obs is None) == (fraction is None):
         raise ValueError("Specify exactly one of n_obs or fraction")
@@ -160,6 +196,8 @@ def subsample(
 
 
 def normalize_total(data: Any, target_sum: float = 1e4, inplace: bool = False) -> Any:
+    if not _use_custom_path(data):
+        return sc.pp.normalize_total(data, target_sum=target_sum, inplace=inplace)
     normalized = _normalize_total(_matrix_from(data), target_sum=target_sum)
     if isinstance(data, AnnDataLite):
         target = _maybe_copy_adata(data, inplace=inplace)
@@ -170,6 +208,8 @@ def normalize_total(data: Any, target_sum: float = 1e4, inplace: bool = False) -
 
 
 def log1p(data: Any, inplace: bool = False) -> Any:
+    if not _use_custom_path(data):
+        return sc.pp.log1p(data, copy=not inplace)
     logged = _log1p(_matrix_from(data))
     if isinstance(data, AnnDataLite):
         target = _maybe_copy_adata(data, inplace=inplace)
@@ -183,6 +223,8 @@ def highly_variable_genes(
     n_top_genes: int = 2000,
     inplace: bool = False,
 ) -> tuple[np.ndarray, dict[str, np.ndarray]] | AnnDataLite:
+    if not _use_custom_path(data):
+        return sc.pp.highly_variable_genes(data, n_top_genes=n_top_genes, inplace=inplace)
     indices, stats = _highly_variable_genes(_matrix_from(data), n_top_genes=n_top_genes)
     if isinstance(data, AnnDataLite):
         target = _maybe_copy_adata(data, inplace=inplace)
@@ -203,6 +245,8 @@ def scale(
     max_value: float | None = 10.0,
     inplace: bool = False,
 ) -> Any:
+    if not _use_custom_path(data):
+        return sc.pp.scale(data, zero_center=zero_center, max_value=max_value, copy=not inplace)
     scaled = _scale(_matrix_from(data), zero_center=zero_center, max_value=max_value)
     if isinstance(data, AnnDataLite):
         target = _maybe_copy_adata(data, inplace=inplace)
@@ -217,6 +261,8 @@ def neighbors(
     use_rep: str | None = None,
     inplace: bool = False,
 ) -> Any:
+    if not _use_custom_path(data):
+        return sc.pp.neighbors(data, n_neighbors=n_neighbors, use_rep=use_rep, copy=not inplace)
     matrix = data.obsm[use_rep] if isinstance(data, AnnDataLite) and use_rep else _matrix_from(data)
     result = _neighbors(matrix, n_neighbors=n_neighbors)
     if isinstance(data, AnnDataLite):
@@ -230,3 +276,27 @@ def neighbors(
         }
         return target
     return result
+
+
+def pca(data: Any, n_comps: int = 50, inplace: bool = False, **kwargs: Any) -> Any:
+    if not _use_custom_path(data):
+        return sc.pp.pca(data, n_comps=n_comps, **kwargs)
+    result = _pca(_matrix_from(data), n_comps=n_comps)
+    if isinstance(data, AnnDataLite):
+        target = _maybe_copy_adata(data, inplace=inplace)
+        target.obsm["X_pca"] = result["scores"]
+        target.varm["PCs"] = result["components"]
+        target.uns["pca"] = {
+            "variance": result["explained_variance"],
+            "variance_ratio": result["explained_variance_ratio"],
+        }
+        return target
+    return result
+
+
+def __getattr__(name: str) -> Any:
+    return getattr(sc.pp, name)
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(dir(sc.pp)))
