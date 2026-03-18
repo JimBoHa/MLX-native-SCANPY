@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import numpy as np
 import scanpy as sc
@@ -176,6 +177,49 @@ class ScanpyParityTests(unittest.TestCase):
         adata = AnnData(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))
         pp.normalize_total(adata, target_sum=10.0, inplace=True)
         np.testing.assert_allclose(np.asarray(adata.X).sum(axis=1), np.array([10.0, 10.0]), rtol=1e-5)
+
+    def test_dense_anndata_normalize_total_uses_mlx_path(self):
+        adata = AnnData(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))
+        with mock.patch("mlx_native_scanpy.pp.sc.pp.normalize_total", side_effect=AssertionError("fallback used")):
+            result = pp.normalize_total(adata, target_sum=10.0, inplace=False)
+        np.testing.assert_allclose(np.asarray(result.X).sum(axis=1), np.array([10.0, 10.0]), rtol=1e-5)
+
+    def test_dense_anndata_pca_and_neighbors_use_mlx_path(self):
+        adata = AnnData(
+            np.array(
+                [
+                    [3.0, 1.0, 0.0, 5.0],
+                    [4.0, 0.0, 1.0, 2.0],
+                    [0.0, 6.0, 2.0, 1.0],
+                    [2.0, 2.0, 4.0, 3.0],
+                ],
+                dtype=np.float32,
+            )
+        )
+        with mock.patch("mlx_native_scanpy.pp.sc.pp.pca", side_effect=AssertionError("fallback used")):
+            adata = pp.pca(adata, n_comps=2, inplace=False)
+        with mock.patch("mlx_native_scanpy.pp.sc.pp.neighbors", side_effect=AssertionError("fallback used")):
+            adata = pp.neighbors(adata, n_neighbors=1, use_rep="X_pca", inplace=False)
+        self.assertEqual(np.asarray(adata.obsm["X_pca"]).shape, (4, 2))
+        self.assertIn("connectivities", adata.obsp)
+
+    def test_dense_anndata_rank_genes_groups_uses_mlx_path(self):
+        adata = AnnData(
+            np.array(
+                [
+                    [10.0, 0.0, 1.0, 0.0],
+                    [11.0, 0.0, 2.0, 0.0],
+                    [0.0, 7.0, 0.0, 1.0],
+                    [0.0, 8.0, 0.0, 2.0],
+                ],
+                dtype=np.float32,
+            )
+        )
+        adata.obs["cluster"] = np.array(["A", "A", "B", "B"])
+        with mock.patch("mlx_native_scanpy.tl.sc.tl.rank_genes_groups", side_effect=AssertionError("fallback used")):
+            result = tl.rank_genes_groups(adata, groupby="cluster", n_genes=2)
+        self.assertEqual(result["names"]["A"].shape[0], 2)
+        self.assertEqual(result["names"]["B"].shape[0], 2)
 
 
 if __name__ == "__main__":

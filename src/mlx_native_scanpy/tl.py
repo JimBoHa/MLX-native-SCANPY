@@ -5,12 +5,19 @@ from typing import Any
 import numpy as np
 import scanpy as sc
 from anndata import AnnData as ScanpyAnnData
+from scipy import sparse
 
 from .anndata import AnnDataLite
+from ._mlx import get_mx
+from .analysis import EPSILON, _topk_descending
 
 
 def _use_custom_path(data: Any) -> bool:
-    return isinstance(data, AnnDataLite) or not isinstance(data, ScanpyAnnData)
+    if isinstance(data, AnnDataLite):
+        return True
+    if isinstance(data, ScanpyAnnData):
+        return not sparse.issparse(data.X)
+    return True
 
 
 def rank_genes_groups(
@@ -34,9 +41,10 @@ def rank_genes_groups(
         raise ValueError("Only reference='rest' is currently supported")
 
     labels = np.asarray(adata.obs[groupby])
-    matrix = np.asarray(adata.X)
+    mx = get_mx()
+    matrix = adata.X if isinstance(adata, AnnDataLite) else mx.array(np.asarray(adata.X), dtype=mx.float32)
     unique_groups = [str(group) for group in np.unique(labels)] if groups is None else groups
-    top_n = matrix.shape[1] if n_genes is None else max(1, min(int(n_genes), matrix.shape[1]))
+    top_n = int(matrix.shape[1]) if n_genes is None else max(1, min(int(n_genes), int(matrix.shape[1])))
 
     names: dict[str, np.ndarray] = {}
     scores: dict[str, np.ndarray] = {}
@@ -50,24 +58,40 @@ def rank_genes_groups(
         if target_mask.sum() == 0 or reference_mask.sum() == 0:
             raise ValueError(f"Group {group!r} does not have enough observations")
 
-        target = matrix[target_mask]
-        background = matrix[reference_mask]
-        target_mean = target.mean(axis=0)
-        background_mean = background.mean(axis=0)
-        target_var = target.var(axis=0, ddof=1) if target.shape[0] > 1 else np.zeros(matrix.shape[1])
-        background_var = (
-            background.var(axis=0, ddof=1) if background.shape[0] > 1 else np.zeros(matrix.shape[1])
-        )
-        denom = np.sqrt((target_var / max(target.shape[0], 1)) + (background_var / max(background.shape[0], 1)) + 1e-8)
-        t_scores = (target_mean - background_mean) / denom
-        target_mean_safe = np.maximum(target_mean, 0.0) + 1e-8
-        background_mean_safe = np.maximum(background_mean, 0.0) + 1e-8
-        lfc = np.log2(target_mean_safe / background_mean_safe)
+        target_indices = mx.array(np.flatnonzero(target_mask).astype(np.int32))
+        reference_indices = mx.array(np.flatnonzero(reference_mask).astype(np.int32))
+        target = mx.take(matrix, target_indices, axis=0)
+        background = mx.take(matrix, reference_indices, axis=0)
+        target_mean = mx.mean(target, axis=0)
+        background_mean = mx.mean(background, axis=0)
 
-        order = np.argsort(-t_scores)[:top_n]
-        names[group] = gene_names[order]
-        scores[group] = t_scores[order].astype(np.float32)
-        logfoldchanges[group] = lfc[order].astype(np.float32)
+        if int(target.shape[0]) > 1:
+            target_centered = target - target_mean
+            target_var = mx.sum(target_centered * target_centered, axis=0) / max(int(target.shape[0]) - 1, 1)
+        else:
+            target_var = mx.zeros((int(matrix.shape[1]),), dtype=mx.float32)
+
+        if int(background.shape[0]) > 1:
+            background_centered = background - background_mean
+            background_var = mx.sum(background_centered * background_centered, axis=0) / max(int(background.shape[0]) - 1, 1)
+        else:
+            background_var = mx.zeros((int(matrix.shape[1]),), dtype=mx.float32)
+
+        denom = mx.sqrt(
+            (target_var / max(int(target.shape[0]), 1))
+            + (background_var / max(int(background.shape[0]), 1))
+            + EPSILON
+        )
+        t_scores = (target_mean - background_mean) / denom
+        target_mean_safe = mx.maximum(target_mean, 0.0) + EPSILON
+        background_mean_safe = mx.maximum(background_mean, 0.0) + EPSILON
+        lfc = mx.log2(target_mean_safe / background_mean_safe)
+
+        order = _topk_descending(t_scores, top_n)
+        order_np = np.asarray(order).astype(np.int64)
+        names[group] = gene_names[order_np]
+        scores[group] = np.asarray(mx.take(t_scores, order, axis=0)).astype(np.float32)
+        logfoldchanges[group] = np.asarray(mx.take(lfc, order, axis=0)).astype(np.float32)
 
     result = {
         "names": names,
