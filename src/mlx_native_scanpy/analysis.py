@@ -40,10 +40,16 @@ def _topk_descending(values: Any, k: int) -> Any:
     return mx.take(candidates, candidate_order, axis=0)
 
 
-def normalize_total(data: Any, target_sum: float = 1e4) -> Any:
+def normalize_total(data: Any, target_sum: float | None = 1e4) -> Any:
     mx = get_mx()
     x = _to_mx_array(data)
     totals = mx.sum(x, axis=1, keepdims=True)
+    if target_sum is None:
+        # Match Scanpy: normalize each cell to the median of total counts,
+        # computed over cells that have any counts.
+        totals_np = _to_numpy(totals).reshape(-1)
+        nonzero = totals_np[totals_np > 0]
+        target_sum = float(np.median(nonzero)) if nonzero.size else 1.0
     safe_totals = mx.where(totals > 0, totals, mx.ones_like(totals))
     scale_factors = target_sum / safe_totals
     return x * scale_factors

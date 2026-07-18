@@ -247,7 +247,7 @@ def subsample(
     return _take_rows(data, selected, inplace=inplace)
 
 
-def normalize_total(data: Any, target_sum: float = 1e4, inplace: bool = False) -> Any:
+def normalize_total(data: Any, target_sum: float | None = 1e4, inplace: bool = False) -> Any:
     if not _use_custom_path(data):
         return sc.pp.normalize_total(data, target_sum=target_sum, inplace=inplace)
     normalized = _normalize_total(_matrix_from(data), target_sum=target_sum)
