@@ -32,6 +32,19 @@ class NormalizeTotalTests(unittest.TestCase):
         np.testing.assert_allclose(row_sums, np.array([10.0, 10.0]), rtol=1e-5)
         np.testing.assert_allclose(normalized[1], np.array([0.0, 0.0, 10.0]), rtol=1e-5)
 
+    def test_normalize_total_none_uses_median_of_counts(self):
+        # Row totals are 2, 4, 10 -> median 4. Each row is rescaled to 4.
+        counts = [[1.0, 1.0], [2.0, 2.0], [5.0, 5.0]]
+        normalized = as_numpy(normalize_total(counts, target_sum=None))
+        np.testing.assert_allclose(normalized.sum(axis=1), np.array([4.0, 4.0, 4.0]), rtol=1e-5)
+
+    def test_normalize_total_none_matches_scanpy(self):
+        counts = np.array([[3.0, 1.0, 0.0], [4.0, 0.0, 1.0], [0.0, 6.0, 2.0]], dtype=np.float32)
+        ours = as_numpy(normalize_total(counts, target_sum=None))
+        adata = AnnData(counts.copy())
+        sc.pp.normalize_total(adata, target_sum=None)
+        np.testing.assert_allclose(ours, np.asarray(adata.X), rtol=1e-5)
+
 
 class HighlyVariableGenesTests(unittest.TestCase):
     def test_hvg_prefers_most_variable_feature(self):
