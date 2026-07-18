@@ -6,10 +6,26 @@ import numpy as np
 import scanpy as sc
 from anndata import AnnData as ScanpyAnnData
 from scipy import sparse
+from scipy import stats
 
 from .anndata import AnnDataLite
 from ._mlx import get_mx
 from .analysis import EPSILON, _topk_descending
+
+
+def _benjamini_hochberg(pvals: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg FDR adjustment, matching Scanpy's method='benjamini-hochberg'."""
+    p = np.asarray(pvals, dtype=np.float64)
+    n = p.size
+    if n == 0:
+        return p
+    order = np.argsort(p)
+    ranked = p[order] * n / (np.arange(n) + 1.0)
+    # Enforce monotonicity from the largest p-value downwards.
+    ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+    adjusted = np.empty(n, dtype=np.float64)
+    adjusted[order] = np.clip(ranked, 0.0, 1.0)
+    return adjusted
 
 
 def _use_custom_path(data: Any) -> bool:
@@ -49,6 +65,8 @@ def rank_genes_groups(
     names: dict[str, np.ndarray] = {}
     scores: dict[str, np.ndarray] = {}
     logfoldchanges: dict[str, np.ndarray] = {}
+    pvals: dict[str, np.ndarray] = {}
+    pvals_adj: dict[str, np.ndarray] = {}
 
     gene_names = np.asarray(adata.var_names)
 
@@ -87,16 +105,36 @@ def rank_genes_groups(
         background_mean_safe = mx.maximum(background_mean, 0.0) + EPSILON
         lfc = mx.log2(target_mean_safe / background_mean_safe)
 
+        # Two-sided Welch's t-test p-values with the Welch-Satterthwaite
+        # degrees of freedom, then a Benjamini-Hochberg FDR adjustment.
+        n_target = max(int(target.shape[0]), 1)
+        n_background = max(int(background.shape[0]), 1)
+        tv = np.asarray(target_var).astype(np.float64)
+        bv = np.asarray(background_var).astype(np.float64)
+        se_target = tv / n_target
+        se_background = bv / n_background
+        df_denom = (se_target ** 2) / max(n_target - 1, 1) + (se_background ** 2) / max(n_background - 1, 1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            dof = np.where(df_denom > 0, (se_target + se_background) ** 2 / df_denom, 1.0)
+        dof = np.maximum(dof, 1.0)
+        t_np = np.asarray(t_scores).astype(np.float64)
+        gene_pvals = np.clip(2.0 * stats.t.sf(np.abs(t_np), dof), 0.0, 1.0)
+        gene_pvals_adj = _benjamini_hochberg(gene_pvals)
+
         order = _topk_descending(t_scores, top_n)
         order_np = np.asarray(order).astype(np.int64)
         names[group] = gene_names[order_np]
         scores[group] = np.asarray(mx.take(t_scores, order, axis=0)).astype(np.float32)
         logfoldchanges[group] = np.asarray(mx.take(lfc, order, axis=0)).astype(np.float32)
+        pvals[group] = gene_pvals[order_np].astype(np.float64)
+        pvals_adj[group] = gene_pvals_adj[order_np].astype(np.float64)
 
     result = {
         "names": names,
         "scores": scores,
         "logfoldchanges": logfoldchanges,
+        "pvals": pvals,
+        "pvals_adj": pvals_adj,
     }
     adata.uns["rank_genes_groups"] = result
     return result

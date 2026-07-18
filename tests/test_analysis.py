@@ -159,6 +159,44 @@ class AnnDataLiteTests(unittest.TestCase):
         self.assertEqual(ranks["names"]["B"].shape[0], 2)
 
 
+class RankGenesGroupsPValueTests(unittest.TestCase):
+    def _make_adata(self):
+        return AnnDataLite(
+            X=[
+                [10.0, 0.0, 1.0, 0.0],
+                [11.0, 0.0, 2.0, 0.0],
+                [9.0, 1.0, 0.0, 1.0],
+                [0.0, 7.0, 0.0, 1.0],
+                [0.0, 8.0, 0.0, 2.0],
+                [1.0, 9.0, 1.0, 0.0],
+            ],
+            obs_names=[f"c{i}" for i in range(6)],
+            var_names=["gene_a", "gene_b", "gene_c", "gene_d"],
+            obs={"cluster": np.array(["A", "A", "A", "B", "B", "B"])},
+        )
+
+    def test_rank_genes_groups_reports_pvalues(self):
+        adata = self._make_adata()
+        ranks = tl.rank_genes_groups(adata, groupby="cluster")
+
+        for group in ("A", "B"):
+            self.assertIn(group, ranks["pvals"])
+            self.assertIn(group, ranks["pvals_adj"])
+            p = ranks["pvals"][group]
+            padj = ranks["pvals_adj"][group]
+            self.assertEqual(p.shape, ranks["names"][group].shape)
+            self.assertTrue(np.all((p >= 0.0) & (p <= 1.0)))
+            self.assertTrue(np.all((padj >= 0.0) & (padj <= 1.0)))
+            # Adjusted p-values are never smaller than the raw ones.
+            self.assertTrue(np.all(padj + 1e-9 >= p))
+
+    def test_rank_genes_groups_pvalues_stored_in_uns(self):
+        adata = self._make_adata()
+        tl.rank_genes_groups(adata, groupby="cluster")
+        self.assertIn("pvals", adata.uns["rank_genes_groups"])
+        self.assertIn("pvals_adj", adata.uns["rank_genes_groups"])
+
+
 class ScanpyParityTests(unittest.TestCase):
     def test_top_level_api_covers_scanpy(self):
         expected = {name for name in dir(sc) if not name.startswith("_")}
