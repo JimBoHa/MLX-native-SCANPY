@@ -159,6 +159,45 @@ class AnnDataLiteTests(unittest.TestCase):
         self.assertEqual(ranks["names"]["B"].shape[0], 2)
 
 
+class AnnDataLiteErgonomicsTests(unittest.TestCase):
+    def _adata(self):
+        return AnnDataLite(
+            X=[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
+            obs_names=["c0", "c1", "c2"],
+            var_names=["g0", "g1", "g2"],
+            obs={"score": np.array([10.0, 20.0, 30.0])},
+            var={"flag": np.array([True, False, True])},
+        )
+
+    def test_to_df_shape_and_labels(self):
+        df = self._adata().to_df()
+        self.assertEqual(list(df.index), ["c0", "c1", "c2"])
+        self.assertEqual(list(df.columns), ["g0", "g1", "g2"])
+        np.testing.assert_allclose(df.loc["c1"].to_numpy(), np.array([4.0, 5.0, 6.0]))
+
+    def test_getitem_row_slice(self):
+        sub = self._adata()[1:]
+        self.assertEqual(sub.obs_names, ["c1", "c2"])
+        self.assertEqual(sub.n_obs, 2)
+        self.assertEqual(sub.obs["score"].tolist(), [20.0, 30.0])
+
+    def test_getitem_boolean_and_names(self):
+        adata = self._adata()
+        sub = adata[np.array([True, False, True]), ["g0", "g2"]]
+        self.assertEqual(sub.obs_names, ["c0", "c2"])
+        self.assertEqual(sub.var_names, ["g0", "g2"])
+        np.testing.assert_allclose(np.asarray(sub.X), np.array([[1.0, 3.0], [7.0, 9.0]]))
+        self.assertEqual(sub.var["flag"].tolist(), [True, True])
+
+    def test_getitem_subsets_square_obsp(self):
+        adata = self._adata()
+        adata.obsp["conn"] = np.arange(9, dtype=np.float32).reshape(3, 3)
+        sub = adata[[0, 2]]
+        np.testing.assert_allclose(
+            np.asarray(sub.obsp["conn"]), np.array([[0.0, 2.0], [6.0, 8.0]])
+        )
+
+
 class ScanpyParityTests(unittest.TestCase):
     def test_top_level_api_covers_scanpy(self):
         expected = {name for name in dir(sc) if not name.startswith("_")}
