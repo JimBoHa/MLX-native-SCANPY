@@ -69,6 +69,10 @@ def _take_rows(data: Any, row_indices: np.ndarray, inplace: bool) -> tuple[Any, 
             target.obs[key] = np.asarray(value)[row_mask]
         for key, value in list(target.obsm.items()):
             target.obsm[key] = _as_numpy(value)[row_mask]
+        for key, value in list(target.obsp.items()):
+            target.obsp[key] = _as_numpy(value)[np.ix_(row_mask, row_mask)]
+        for key, value in list(target.layers.items()):
+            target.layers[key] = _as_numpy(value)[row_mask]
         return target, row_mask
 
     if _is_scanpy_adata(data):
@@ -96,6 +100,10 @@ def _take_cols(data: Any, col_indices: np.ndarray, inplace: bool) -> tuple[Any, 
             target.var[key] = np.asarray(value)[col_mask]
         for key, value in list(target.varm.items()):
             target.varm[key] = _as_numpy(value)[col_mask]
+        for key, value in list(target.varp.items()):
+            target.varp[key] = _as_numpy(value)[np.ix_(col_mask, col_mask)]
+        for key, value in list(target.layers.items()):
+            target.layers[key] = _as_numpy(value)[:, col_mask]
         return target, col_mask
 
     if _is_scanpy_adata(data):

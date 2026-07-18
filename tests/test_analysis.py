@@ -158,6 +158,44 @@ class AnnDataLiteTests(unittest.TestCase):
         self.assertEqual(ranks["names"]["A"].shape[0], 2)
         self.assertEqual(ranks["names"]["B"].shape[0], 2)
 
+    def test_filter_cells_subsets_obsp_and_layers(self):
+        adata = AnnDataLite(
+            X=[
+                [0.0, 0.0, 0.0, 0.0],
+                [1.0, 2.0, 3.0, 4.0],
+                [2.0, 2.0, 2.0, 2.0],
+                [9.0, 0.0, 0.0, 0.0],
+            ]
+        )
+        adata.layers["counts"] = np.asarray(adata.X).copy()
+        adata = pp.neighbors(adata, n_neighbors=2)
+        self.assertEqual(np.asarray(adata.obsp["connectivities"]).shape, (4, 4))
+
+        filtered, mask = pp.filter_cells(adata, min_counts=1)
+        n = filtered.n_obs
+        self.assertEqual(n, int(mask.sum()))
+        # obsp is a square cell-by-cell matrix and must track the new cell count.
+        self.assertEqual(np.asarray(filtered.obsp["connectivities"]).shape, (n, n))
+        # layers are cell-by-gene and must track the kept rows.
+        self.assertEqual(np.asarray(filtered.layers["counts"]).shape, (n, 4))
+
+    def test_filter_genes_subsets_varp_and_layers(self):
+        adata = AnnDataLite(
+            X=[
+                [5.0, 0.0, 1.0, 2.0],
+                [4.0, 0.0, 1.0, 3.0],
+                [6.0, 0.0, 2.0, 1.0],
+            ]
+        )
+        adata.layers["counts"] = np.asarray(adata.X).copy()
+        adata.varp["corr"] = np.eye(4, dtype=np.float32)
+
+        filtered, mask = pp.filter_genes(adata, min_cells=1)
+        n_vars = filtered.n_vars
+        self.assertEqual(n_vars, int(mask.sum()))
+        self.assertEqual(np.asarray(filtered.varp["corr"]).shape, (n_vars, n_vars))
+        self.assertEqual(np.asarray(filtered.layers["counts"]).shape, (3, n_vars))
+
 
 class ScanpyParityTests(unittest.TestCase):
     def test_top_level_api_covers_scanpy(self):
