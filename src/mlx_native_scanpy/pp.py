@@ -107,38 +107,79 @@ def _take_cols(data: Any, col_indices: np.ndarray, inplace: bool) -> tuple[Any, 
     return subset, col_mask
 
 
-def calculate_qc_metrics(data: Any) -> dict[str, np.ndarray]:
+def _var_column(data: Any, name: str) -> np.ndarray:
+    if isinstance(data, AnnDataLite):
+        if name not in data.var:
+            raise KeyError(f"qc_var {name!r} not found in adata.var")
+        return np.asarray(data.var[name])
+    if name not in data.var.columns:
+        raise KeyError(f"qc_var {name!r} not found in adata.var")
+    return np.asarray(data.var[name])
+
+
+def calculate_qc_metrics(
+    data: Any,
+    qc_vars: "list[str] | tuple[str, ...]" = (),
+    percent_top: "list[int] | tuple[int, ...] | None" = (50,),
+    inplace: bool = True,
+) -> dict[str, np.ndarray]:
     if not _use_custom_path(data):
-        return sc.pp.calculate_qc_metrics(data)
+        return sc.pp.calculate_qc_metrics(
+            data, qc_vars=qc_vars, percent_top=percent_top, inplace=inplace
+        )
     mx = get_mx()
     matrix = _matrix_from(data)
+    n_vars = int(matrix.shape[1])
     total_counts = _as_numpy(mx.sum(matrix, axis=1)).astype(np.float32)
     n_genes_by_counts = _as_numpy(mx.sum(matrix > 0, axis=1)).astype(np.int64)
     total_counts_per_gene = _as_numpy(mx.sum(matrix, axis=0)).astype(np.float32)
     n_cells_by_counts = _as_numpy(mx.sum(matrix > 0, axis=0)).astype(np.int64)
+    safe_total = np.maximum(total_counts, EPSILON)
 
-    sorted_counts = mx.sort(matrix, axis=1)
-    top_k = min(50, int(matrix.shape[1]))
-    top_positions = mx.arange(int(matrix.shape[1]) - 1, int(matrix.shape[1]) - top_k - 1, -1)
-    top_counts = mx.take(sorted_counts, top_positions, axis=1)
-    pct_counts_top_50 = (
-        _as_numpy(mx.sum(top_counts, axis=1)).astype(np.float32)
-        / np.maximum(total_counts, EPSILON)
-        * 100.0
-    ).astype(np.float32)
-
-    metrics = {
+    metrics: dict[str, np.ndarray] = {
         "total_counts": total_counts,
         "n_genes_by_counts": n_genes_by_counts,
         "total_counts_per_gene": total_counts_per_gene,
         "n_cells_by_counts": n_cells_by_counts,
-        "pct_counts_top_50_genes": pct_counts_top_50,
     }
 
-    if isinstance(data, AnnDataLite) or _is_scanpy_adata(data):
+    # Cumulative expression captured by the top-N most expressed genes per cell.
+    pct_top: dict[str, np.ndarray] = {}
+    if percent_top:
+        sorted_counts = mx.sort(matrix, axis=1)
+        for n in percent_top:
+            top_k = min(int(n), n_vars)
+            if top_k <= 0:
+                continue
+            top_positions = mx.arange(n_vars - 1, n_vars - top_k - 1, -1)
+            top_counts = mx.take(sorted_counts, top_positions, axis=1)
+            pct = (_as_numpy(mx.sum(top_counts, axis=1)).astype(np.float32) / safe_total * 100.0).astype(np.float32)
+            key = f"pct_counts_in_top_{int(n)}_genes"
+            metrics[key] = pct
+            pct_top[key] = pct
+
+    # Per-cell fraction of counts falling in a flagged gene set (e.g. mitochondrial).
+    qc_metrics: dict[str, np.ndarray] = {}
+    for qc_var in qc_vars:
+        mask = _var_column(data, qc_var).astype(bool)
+        mask_indices = mx.array(np.flatnonzero(mask).astype(np.int32))
+        if int(mask_indices.shape[0]) == 0:
+            var_total = np.zeros_like(total_counts)
+        else:
+            var_total = _as_numpy(mx.sum(mx.take(matrix, mask_indices, axis=1), axis=1)).astype(np.float32)
+        pct_var = (var_total / safe_total * 100.0).astype(np.float32)
+        qc_metrics[f"total_counts_{qc_var}"] = var_total
+        qc_metrics[f"pct_counts_{qc_var}"] = pct_var
+        metrics[f"total_counts_{qc_var}"] = var_total
+        metrics[f"pct_counts_{qc_var}"] = pct_var
+
+    if inplace and (isinstance(data, AnnDataLite) or _is_scanpy_adata(data)):
         data.obs["total_counts"] = total_counts
         data.obs["n_genes_by_counts"] = n_genes_by_counts
-        data.obs["pct_counts_top_50_genes"] = pct_counts_top_50
+        for key, value in pct_top.items():
+            data.obs[key] = value
+        for key, value in qc_metrics.items():
+            data.obs[key] = value
         data.var["total_counts"] = total_counts_per_gene
         data.var["n_cells_by_counts"] = n_cells_by_counts
 

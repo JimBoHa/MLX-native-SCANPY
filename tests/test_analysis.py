@@ -159,6 +159,52 @@ class AnnDataLiteTests(unittest.TestCase):
         self.assertEqual(ranks["names"]["B"].shape[0], 2)
 
 
+class QCMetricsTests(unittest.TestCase):
+    def test_qc_vars_and_percent_top(self):
+        adata = AnnDataLite(
+            X=[
+                [8.0, 2.0, 0.0, 0.0],
+                [0.0, 0.0, 5.0, 5.0],
+            ],
+            var_names=["mt-1", "mt-2", "gene_a", "gene_b"],
+            var={"mt": np.array([True, True, False, False])},
+        )
+        metrics = pp.calculate_qc_metrics(adata, qc_vars=["mt"], percent_top=[2])
+
+        # Row 0 is entirely mitochondrial, row 1 has none.
+        np.testing.assert_allclose(metrics["pct_counts_mt"], np.array([100.0, 0.0]), rtol=1e-5)
+        np.testing.assert_allclose(metrics["total_counts_mt"], np.array([10.0, 0.0]), rtol=1e-5)
+        self.assertIn("pct_counts_in_top_2_genes", metrics)
+        # obs is populated by default (inplace=True).
+        self.assertIn("pct_counts_mt", adata.obs)
+
+    def test_inplace_false_leaves_obs_untouched(self):
+        adata = AnnDataLite(X=[[1.0, 2.0], [3.0, 4.0]])
+        pp.calculate_qc_metrics(adata, inplace=False)
+        self.assertNotIn("total_counts", adata.obs)
+
+    def test_qc_vars_matches_scanpy(self):
+        counts = np.array(
+            [[8.0, 2.0, 1.0, 0.0], [0.0, 1.0, 5.0, 5.0], [3.0, 3.0, 3.0, 3.0]],
+            dtype=np.float32,
+        )
+        var_names = ["mt-1", "mt-2", "gene_a", "gene_b"]
+        adata = AnnData(counts.copy())
+        adata.var_names = var_names
+        adata.var["mt"] = np.array([True, True, False, False])
+        obs_df, _ = sc.pp.calculate_qc_metrics(adata, qc_vars=["mt"], percent_top=None, inplace=False)
+
+        lite = AnnDataLite(
+            X=counts.copy(),
+            var_names=var_names,
+            var={"mt": np.array([True, True, False, False])},
+        )
+        ours = pp.calculate_qc_metrics(lite, qc_vars=["mt"], percent_top=None, inplace=False)
+        np.testing.assert_allclose(
+            ours["pct_counts_mt"], np.asarray(obs_df["pct_counts_mt"]), rtol=1e-4
+        )
+
+
 class ScanpyParityTests(unittest.TestCase):
     def test_top_level_api_covers_scanpy(self):
         expected = {name for name in dir(sc) if not name.startswith("_")}
