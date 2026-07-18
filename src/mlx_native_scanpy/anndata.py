@@ -20,6 +20,24 @@ def _clone_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
     return cloned
 
 
+def _resolve_indices(selector: Any, names: list[str], length: int) -> list[int]:
+    """Turn an AnnData-style selector into a list of positive integer positions."""
+    if isinstance(selector, slice):
+        return list(range(*selector.indices(length)))
+    if isinstance(selector, (int, np.integer)):
+        index = int(selector)
+        return [index + length if index < 0 else index]
+    array = np.asarray(selector)
+    if array.dtype == bool:
+        if array.shape[0] != length:
+            raise IndexError(f"Boolean index length {array.shape[0]} does not match axis length {length}")
+        return np.flatnonzero(array).tolist()
+    if array.dtype.kind in ("U", "S", "O"):
+        lookup = {str(name): position for position, name in enumerate(names)}
+        return [lookup[str(item)] for item in array.tolist()]
+    return [int(item) + length if int(item) < 0 else int(item) for item in array.tolist()]
+
+
 @dataclass(slots=True)
 class AnnDataLite:
     X: Any
@@ -66,4 +84,39 @@ class AnnDataLite:
             varp=_clone_mapping(self.varp),
             uns=_clone_mapping(self.uns),
             layers=_clone_mapping(self.layers),
+        )
+
+    def to_df(self, layer: str | None = None) -> Any:
+        """Return X (or a named layer) as a pandas DataFrame indexed by obs/var names."""
+        import pandas as pd
+
+        matrix = self.layers[layer] if layer is not None else self.X
+        return pd.DataFrame(
+            np.asarray(matrix),
+            index=list(self.obs_names),
+            columns=list(self.var_names),
+        )
+
+    def __getitem__(self, key: Any) -> "AnnDataLite":
+        if isinstance(key, tuple):
+            obs_selector, var_selector = key
+        else:
+            obs_selector, var_selector = key, slice(None)
+
+        row_idx = _resolve_indices(obs_selector, self.obs_names, self.n_obs)
+        col_idx = _resolve_indices(var_selector, self.var_names, self.n_vars)
+
+        matrix = np.asarray(self.X)[np.ix_(row_idx, col_idx)]
+        return AnnDataLite(
+            X=matrix,
+            obs_names=[self.obs_names[i] for i in row_idx],
+            var_names=[self.var_names[j] for j in col_idx],
+            obs={key: np.asarray(value)[row_idx] for key, value in self.obs.items()},
+            var={key: np.asarray(value)[col_idx] for key, value in self.var.items()},
+            obsm={key: np.asarray(value)[row_idx] for key, value in self.obsm.items()},
+            varm={key: np.asarray(value)[col_idx] for key, value in self.varm.items()},
+            obsp={key: np.asarray(value)[np.ix_(row_idx, row_idx)] for key, value in self.obsp.items()},
+            varp={key: np.asarray(value)[np.ix_(col_idx, col_idx)] for key, value in self.varp.items()},
+            uns=_clone_mapping(self.uns),
+            layers={key: np.asarray(value)[np.ix_(row_idx, col_idx)] for key, value in self.layers.items()},
         )
