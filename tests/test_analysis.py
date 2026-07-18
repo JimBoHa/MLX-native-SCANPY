@@ -222,5 +222,40 @@ class ScanpyParityTests(unittest.TestCase):
         self.assertEqual(result["names"]["B"].shape[0], 2)
 
 
+class PCAFallbackInplaceTests(unittest.TestCase):
+    def test_sparse_pca_respects_inplace_false(self):
+        from scipy import sparse
+
+        X = sparse.csr_matrix(
+            np.array(
+                [
+                    [3.0, 1.0, 0.0, 5.0],
+                    [4.0, 0.0, 1.0, 2.0],
+                    [0.0, 6.0, 2.0, 1.0],
+                    [2.0, 2.0, 4.0, 3.0],
+                ],
+                dtype=np.float32,
+            )
+        )
+        adata = AnnData(X)
+        result = pp.pca(adata, n_comps=2, inplace=False)
+
+        # inplace=False must return a new object and leave the original untouched.
+        self.assertIsNotNone(result)
+        self.assertNotIn("X_pca", adata.obsm)
+        self.assertIn("X_pca", result.obsm)
+
+    def test_sparse_pca_respects_inplace_true(self):
+        from scipy import sparse
+
+        X = sparse.csr_matrix(
+            np.array([[3.0, 1.0, 0.0, 5.0], [4.0, 0.0, 1.0, 2.0], [0.0, 6.0, 2.0, 1.0]], dtype=np.float32)
+        )
+        adata = AnnData(X)
+        returned = pp.pca(adata, n_comps=2, inplace=True)
+        self.assertIsNone(returned)
+        self.assertIn("X_pca", adata.obsm)
+
+
 if __name__ == "__main__":
     unittest.main()

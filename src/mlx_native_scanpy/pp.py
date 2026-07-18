@@ -350,6 +350,7 @@ def neighbors(
 
 def pca(data: Any, n_comps: int = 50, inplace: bool = False, **kwargs: Any) -> Any:
     if not _use_custom_path(data):
+        kwargs.setdefault("copy", not inplace)
         return sc.pp.pca(data, n_comps=n_comps, **kwargs)
     result = _pca(_matrix_from(data), n_comps=n_comps)
     if isinstance(data, AnnDataLite):
