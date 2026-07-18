@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,10 +56,13 @@ def normalize_total(data: Any, target_sum: float | None = 1e4) -> Any:
     return x * scale_factors
 
 
-def log1p(data: Any) -> Any:
+def log1p(data: Any, base: float | None = None) -> Any:
     mx = get_mx()
     x = _to_mx_array(data)
-    return mx.log1p(x)
+    logged = mx.log1p(x)
+    if base is not None:
+        logged = logged / float(math.log(base))
+    return logged
 
 
 def scale(

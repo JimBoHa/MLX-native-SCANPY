@@ -46,6 +46,29 @@ class NormalizeTotalTests(unittest.TestCase):
         np.testing.assert_allclose(ours, np.asarray(adata.X), rtol=1e-5)
 
 
+class Log1pTests(unittest.TestCase):
+    def test_log1p_default_is_natural_log(self):
+        from mlx_native_scanpy import log1p as log1p_fn
+
+        matrix = [[0.0, 1.0], [3.0, 7.0]]
+        out = as_numpy(log1p_fn(matrix))
+        np.testing.assert_allclose(out, np.log1p(np.array(matrix)), rtol=1e-5)
+
+    def test_log1p_base_rescales(self):
+        from mlx_native_scanpy import log1p as log1p_fn
+
+        matrix = [[0.0, 1.0], [3.0, 7.0]]
+        out = as_numpy(log1p_fn(matrix, base=2.0))
+        np.testing.assert_allclose(out, np.log2(1.0 + np.array(matrix)), rtol=1e-5)
+
+    def test_pp_log1p_base_matches_scanpy(self):
+        counts = np.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]], dtype=np.float32)
+        result = pp.log1p(AnnData(counts.copy()), base=10.0, inplace=False)
+        adata = AnnData(counts.copy())
+        sc.pp.log1p(adata, base=10.0)
+        np.testing.assert_allclose(np.asarray(result.X), np.asarray(adata.X), rtol=1e-5)
+
+
 class HighlyVariableGenesTests(unittest.TestCase):
     def test_hvg_prefers_most_variable_feature(self):
         matrix = [

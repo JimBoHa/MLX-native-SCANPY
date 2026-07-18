@@ -264,10 +264,10 @@ def normalize_total(data: Any, target_sum: float | None = 1e4, inplace: bool = F
     return normalized
 
 
-def log1p(data: Any, inplace: bool = False) -> Any:
+def log1p(data: Any, base: float | None = None, inplace: bool = False) -> Any:
     if not _use_custom_path(data):
-        return sc.pp.log1p(data, copy=not inplace)
-    logged = _log1p(_matrix_from(data))
+        return sc.pp.log1p(data, base=base, copy=not inplace)
+    logged = _log1p(_matrix_from(data), base=base)
     if isinstance(data, AnnDataLite):
         target = _maybe_copy_adata(data, inplace=inplace)
         target.X = logged
